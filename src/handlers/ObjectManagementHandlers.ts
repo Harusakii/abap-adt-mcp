@@ -5,6 +5,7 @@ import { shrinkToFit, SAFE_OUTPUT_CHARS } from '../lib/responseSizing';
 import { walkPackage } from '../lib/packageWalk';
 import { parseFlatInactiveObjects } from '../lib/inactiveObjects740.js';
 import { activateReferences } from '../lib/activation.js';
+import { includeMainPrograms, isProgramIncludeWithoutContext } from '../lib/includeContext.js';
 
 interface InactiveObject {
   "adtcore:uri": string;
@@ -167,6 +168,16 @@ export class ObjectManagementHandlers extends BaseHandler {
         );
       }
 
+      // A program include activates in the context of its main program
+      // (SAP: "Main program is not anymore valid for include ..." otherwise);
+      // take it from the include's metadata as Eclipse does.
+      objects = await Promise.all(objects.map(async (obj: any) => {
+        if (!isProgramIncludeWithoutContext(obj["adtcore:uri"])) return obj;
+        try {
+          const main = (await includeMainPrograms(this.adtclient.httpClient as any, obj["adtcore:uri"]))[0];
+          return main ? { ...obj, "adtcore:uri": `${obj["adtcore:uri"]}?context=${encodeURIComponent(main["adtcore:uri"])}` } : obj;
+        } catch { return obj; }
+      }));
       const result = await activateReferences(this.adtclient.httpClient as any, objects, args.preauditRequested ?? true);
       this.trackRequest(startTime, true);
       return {
