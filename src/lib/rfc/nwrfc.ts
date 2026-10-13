@@ -260,7 +260,7 @@ export function findSdkArchive(
   const target = intoConfigured ? p.dirname(configuredHome!) : p.join(homedir, 'sap');
   const sdkPath = p.join(target, 'nwrfcsdk');
   return intoConfigured
-    ? { file, sdkPath, instruction: `unpack it with: unzip -o "${file}" -d "${target}", which recreates ${sdkPath} where systems.json points; then restart the MCP server.` }
+    ? { file, sdkPath, instruction: `unpack it with: unzip -o "${file}" -d "${target}", which recreates ${sdkPath} where systems.json points; then call the tool again (the server loads the SDK on the next RFC request, no restart needed).` }
     : { file, sdkPath, instruction: `unpack it with: unzip -o "${file}" -d "${target}", then set "sdkPath": "${sdkPath}" in the rfc block of systems.json (or SAPNWRFC_HOME) and restart the MCP server.` };
 }
 

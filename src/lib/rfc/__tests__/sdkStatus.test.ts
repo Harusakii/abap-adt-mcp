@@ -31,7 +31,7 @@ describe('findSdkArchive', () => {
 
   it('unpacks into the configured nwrfcsdk folder when there is one, else into ~/sap with a setting to add', () => {
     const into = findSdkArchive('darwin', '/home/u', io(files), '/home/u/sap/nwrfcsdk')!;
-    expect(into.instruction).toBe('unpack it with: unzip -o "/home/u/Downloads/nwrfc750P_20-80008131.zip" -d "/home/u/sap", which recreates /home/u/sap/nwrfcsdk where systems.json points; then restart the MCP server.');
+    expect(into.instruction).toBe('unpack it with: unzip -o "/home/u/Downloads/nwrfc750P_20-80008131.zip" -d "/home/u/sap", which recreates /home/u/sap/nwrfcsdk where systems.json points; then call the tool again (the server loads the SDK on the next RFC request, no restart needed).');
     const fresh = findSdkArchive('darwin', '/home/u', io(files))!;
     expect(fresh.sdkPath).toBe('/home/u/sap/nwrfcsdk');
     expect(fresh.instruction).toMatch(/set "sdkPath": "\/home\/u\/sap\/nwrfcsdk" in the rfc block of systems.json/);
