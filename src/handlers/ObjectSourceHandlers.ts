@@ -186,7 +186,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       let fullSource = await this.adtclient.getObjectSource(url, opts);
       // A bare object URL answers the ADT metadata document for some types
       // (application job templates, ...): retry the source resource.
-      if (/^\s*<\?xml|^\s*<[a-z]+:/i.test(fullSource) && !/\/source\/main\/?$/i.test(url) && !/\/oo\/classes\/[^/]+\/includes\/|\/messageclass\//i.test(url)) {
+      if (/^\s*<\?xml|^\s*<[a-z]+:/i.test(fullSource) && !/[?#]/.test(url) && !/\/source\/main\/?$/i.test(url) && !/\/oo\/classes\/[^/]+\/includes\/|\/messageclass\//i.test(url)) {
         try {
           const retried = await this.adtclient.getObjectSource(`${url.replace(/\/$/, '')}/source/main`, opts);
           if (retried && retried.trim()) { fullSource = retried; url = `${url.replace(/\/$/, '')}/source/main`; notes.push('the object URL returned metadata; /source/main was read instead'); }

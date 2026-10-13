@@ -46,4 +46,11 @@ describe('program includes', () => {
     await h.handle('getObjectSource', { objectSourceUrl: '/sap/bc/adt/oo/classes/zcl_x/includes/testclasses/source/main' });
     expect(urls).toEqual([`${INC}/source/main`, '/sap/bc/adt/oo/classes/zcl_x/includes/testclasses']);
   });
+
+  it('getObjectSource does not append /source/main after a query string', async () => {
+    const urls: string[] = [];
+    const client: any = { getObjectSource: jest.fn(async (url: string) => { urls.push(url); return '<?xml version="1.0"?><nameditem:namedItemList/>'; }) };
+    await new ObjectSourceHandlers(client).handle('getObjectSource', { objectSourceUrl: '/sap/bc/adt/repository/informationsystem/objecttypes?name=*' });
+    expect(urls).toEqual(['/sap/bc/adt/repository/informationsystem/objecttypes?name=*']);
+  });
 });
