@@ -2,6 +2,7 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, Range, ExtractMethodProposal, GenericRefactoring, session_types } from 'abap-adt-api';
+import { extractMethodPreview } from '../lib/extractMethod.js';
 type ChangePackageRefactoring = Parameters<ADTClient['changePackageExecute']>[0];
 
 export class RefactorHandlers extends BaseHandler {
@@ -153,7 +154,7 @@ export class RefactorHandlers extends BaseHandler {
         const startTime = performance.now();
         try {
             const proposal = this.parseObjectArg<ExtractMethodProposal>(args.proposal, 'proposal');
-            const result = await this.adtclient.extractMethodPreview(proposal);
+            const result = await extractMethodPreview(this.adtclient.httpClient as any, proposal);
             this.trackRequest(startTime, true);
             return {
                 content: [

@@ -601,3 +601,15 @@ describe('RfcHttpClient logon cut off by SAP', () => {
   });
 });
 
+
+describe('RfcHttpClient debugger requests (split sessions)', () => {
+  it('keeps the work context after debugger writes and resets it after other writes', async () => {
+    const connector = new FakeConnector();
+    const client = makeClient(connector);
+    await client.request({ url: '/sap/bc/adt/debugger/breakpoints', method: 'POST', headers: {}, body: '<x/>' });
+    await client.request({ url: '/sap/bc/adt/debugger/listeners', method: 'POST', headers: {}, qs: { debuggingMode: 'user' } });
+    expect(connector.opened[0].resets).toBe(0);
+    await client.request({ url: '/sap/bc/adt/programs/programs/zx/source/main', method: 'PUT', headers: {}, qs: { lockHandle: 'H' }, body: 'x' });
+    expect(connector.opened[0].resets).toBe(1);
+  });
+});

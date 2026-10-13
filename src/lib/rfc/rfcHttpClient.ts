@@ -189,6 +189,11 @@ export function buildUri(url: string, qs?: Record<string, unknown>): string {
 }
 
 /** LOCK and UNLOCK belong to the enqueue session. Routed on _action, never on the session header. */
+/** ADT debugger resources (breakpoints, listeners, attach, steps, variables). */
+export function isDebuggerRequest(uri: string): boolean {
+  return /^\/sap\/bc\/adt\/debugger(\/|\?|$)/i.test(String(uri || ''));
+}
+
 export function isLockRequest(url: string, qs?: Record<string, unknown>): boolean {
   const actions = [
     ...parseTarget(url).urlPairs.filter(p => pairKey(p) === '_action').map(pairValue),
@@ -338,7 +343,11 @@ export class RfcHttpClient implements HttpClient {
         conn = await this.acquire(slot, options);
         out = await this.call(slot, conn, sadt, options);
       }
-      if (this.options.sessions === 'split' && slot === this.work && !isRead) await this.resetQuietly(slot);
+      // Debugger requests keep their context: breakpoints and the attached
+      // debuggee live in the ABAP session, and a reset after the breakpoint
+      // POST left the listener with nothing to stop at (P03: SAP GUI runs went
+      // straight through twice).
+      if (this.options.sessions === 'split' && slot === this.work && !isRead && !isDebuggerRequest(sadt.uri)) await this.resetQuietly(slot);
       return out;
     });
   }
