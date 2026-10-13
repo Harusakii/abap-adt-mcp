@@ -180,8 +180,12 @@ function sourceDescription(loc: SdkLocation): string {
 }
 
 function sdkNotFoundError(loc: SdkLocation): RfcError {
+  const found = findSdkElsewhere(loc.platform, os.homedir(), loc.home);
+  const archive = found ? undefined : findSdkArchive(loc.platform, os.homedir(), defaultArchiveIo, loc.source === 'default' ? undefined : loc.home);
   const lines = [
     `SAP NetWeaver RFC SDK not found: looked for ${loc.candidates.join(' and ')} (SDK folder taken from ${sourceDescription(loc)}).`,
+    ...(found ? [`An SDK is unpacked at ${found}: set rfc.sdkPath in systems.json (or SAPNWRFC_HOME) to that folder.`] : []),
+    ...(archive ? [`The SDK download is already on this machine (${archive.file}): ${archive.instruction}`] : []),
     'The RFC transport needs the SAP NetWeaver RFC SDK 7.50 (latest patch level). Download it from the SAP Software Download Center with your own S-user'
       + ` (${SDK_DOWNLOAD_URL}; product page ${SDK_INFO_URL}, ${SDK_NOTE}), unpack it, and set SAPNWRFC_HOME or rfc.sdkPath in systems.json to the unpacked folder (the one that contains lib/).`,
     'abap-adt-mcp cannot bundle the SDK because SAP\'s licence terms for connectors forbid redistribution.',
@@ -202,6 +206,114 @@ function isFile(file: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Folders where an unpacked SDK is often found when the configured one is empty. */
+function usualSdkHomes(platform: NodeJS.Platform, homedir: string): string[] {
+  const p = pathFor(platform);
+  return platform === 'win32'
+    ? ['C:\\nwrfcsdk', 'C:\\SAP\\nwrfcsdk', p.join(homedir, 'nwrfcsdk'), p.join(homedir, 'Downloads', 'nwrfcsdk')]
+    : [p.join(homedir, 'sap', 'nwrfcsdk'), p.join(homedir, 'nwrfcsdk'), p.join(homedir, 'Downloads', 'nwrfcsdk'), '/usr/local/sap/nwrfcsdk', '/opt/sap/nwrfcsdk'];
+}
+
+/** An unpacked SDK in one of the usual folders other than the configured one. */
+export function findSdkElsewhere(platform: NodeJS.Platform, homedir: string, configuredHome: string, exists: (file: string) => boolean = isFile): string | undefined {
+  const p = pathFor(platform);
+  const lib = libraryFileName(platform);
+  const same = (a: string, b: string) => (platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+  return usualSdkHomes(platform, homedir).find(h => !same(p.normalize(h), configuredHome) && exists(p.join(h, 'lib', lib)));
+}
+
+export interface SdkArchive { file: string; sdkPath: string; instruction: string }
+
+/**
+ * A downloaded SDK ZIP (nwrfc*.zip in Downloads or on the Desktop) that holds
+ * the library for this platform. The ZIP index sits at the end of the file
+ * with the entry names in plain text, so the tail tells which platform it is
+ * for without unpacking it (SAP ships one ZIP per platform with similar names).
+ */
+export function findSdkArchive(
+  platform: NodeJS.Platform,
+  homedir: string,
+  io: { list: (dir: string) => string[]; tail: (file: string, bytes: number) => Buffer; mtime: (file: string) => number } = defaultArchiveIo,
+  configuredHome?: string,
+): SdkArchive | undefined {
+  const p = pathFor(platform);
+  const entry = `nwrfcsdk/lib/${libraryFileName(platform)}`;
+  const files: string[] = [];
+  for (const dir of [p.join(homedir, 'Downloads'), p.join(homedir, 'Desktop')]) {
+    let names: string[] = [];
+    try { names = io.list(dir); } catch { continue; }
+    for (const n of names) if (/^nwrfc.*\.zip$/i.test(n)) files.push(p.join(dir, n));
+  }
+  files.sort((a, b) => io.mtime(b) - io.mtime(a));
+  const file = files.find(f => {
+    try { return io.tail(f, 1024 * 1024).includes(entry); } catch { return false; }
+  });
+  if (!file) return undefined;
+  if (platform === 'win32') {
+    return { file, sdkPath: 'C:\\nwrfcsdk', instruction: `unpack it to C:\\ (PowerShell: Expand-Archive -Path "${file}" -DestinationPath C:\\), which creates C:\\nwrfcsdk, the default location; then restart the MCP server.` };
+  }
+  // The ZIP holds a top folder nwrfcsdk/: unpack next to the configured folder
+  // when it is named nwrfcsdk, so no setting has to change; else into ~/sap.
+  const intoConfigured = configuredHome && p.basename(configuredHome).toLowerCase() === 'nwrfcsdk';
+  const target = intoConfigured ? p.dirname(configuredHome!) : p.join(homedir, 'sap');
+  const sdkPath = p.join(target, 'nwrfcsdk');
+  return intoConfigured
+    ? { file, sdkPath, instruction: `unpack it with: unzip -o "${file}" -d "${target}", which recreates ${sdkPath} where systems.json points; then restart the MCP server.` }
+    : { file, sdkPath, instruction: `unpack it with: unzip -o "${file}" -d "${target}", then set "sdkPath": "${sdkPath}" in the rfc block of systems.json (or SAPNWRFC_HOME) and restart the MCP server.` };
+}
+
+const defaultArchiveIo = {
+  list: (dir: string) => fs.readdirSync(dir),
+  mtime: (file: string) => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } },
+  tail: (file: string, bytes: number) => {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(size, bytes);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len);
+      return buf;
+    } finally {
+      fs.closeSync(fd);
+    }
+  },
+};
+
+export interface SdkStatus {
+  found: boolean;
+  /** The library file, when found. */
+  libraryPath?: string;
+  /** Where the folder came from: rfc.sdkPath, SAPNWRFC_HOME or the default. */
+  source: string;
+  /** Paths tried, when not found. */
+  lookedFor: string[];
+  /** An unpacked SDK in another usual folder. */
+  elsewhere?: string;
+  /** A downloaded SDK ZIP for this platform. */
+  archive?: SdkArchive;
+}
+
+/** Whether the SDK for a destination is in place, without loading it; when not, where it might be. */
+export function sdkStatus(sdkPath?: string, input: Omit<SdkLocationInput, 'sdkPath'> = {}): SdkStatus {
+  const loc = resolveSdkLocation({ ...input, sdkPath });
+  const libraryPath = loc.candidates.find(c => isFile(c));
+  if (libraryPath) return { found: true, libraryPath, source: sourceDescription(loc), lookedFor: [] };
+  const homedir = input.homedir ?? os.homedir();
+  const elsewhere = findSdkElsewhere(loc.platform, homedir, loc.home);
+  return {
+    found: false, source: sourceDescription(loc), lookedFor: loc.candidates,
+    ...(elsewhere ? { elsewhere } : {}),
+    ...(!elsewhere ? (() => { const a = findSdkArchive(loc.platform, homedir, defaultArchiveIo, loc.source === 'default' ? undefined : loc.home); return a ? { archive: a } : {}; })() : {}),
+  };
+}
+
+/** One sentence on what to do about a missing SDK, for --check, listSystems and healthcheck. */
+export function sdkMissingAdvice(st: SdkStatus): string {
+  if (st.elsewhere) return `An SDK is unpacked at ${st.elsewhere}: set rfc.sdkPath in systems.json to that folder and restart the MCP server.`;
+  if (st.archive) return `The SDK download is on this machine (${st.archive.file}): ${st.archive.instruction}`;
+  return `Download the SAP NetWeaver RFC SDK 7.50 with your own S-user (${SDK_DOWNLOAD_URL}), unpack it and set rfc.sdkPath in systems.json to the folder that contains lib/ (docs/RFC.md). It is not bundled: SAP's licence forbids redistribution.`;
 }
 
 /** Platform-specific fix for a library that exists but does not load. */

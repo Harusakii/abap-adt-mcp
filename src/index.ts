@@ -71,6 +71,15 @@ import { TextElementHandlers } from './handlers/TextElementHandlers.js';
 import { SearchHandlers } from './handlers/SearchHandlers.js';
 import { CloudHandlers } from './handlers/CloudHandlers.js';
 import { SnippetHandlers } from './handlers/SnippetHandlers.js';
+import { sdkStatus, sdkMissingAdvice } from './lib/rfc/nwrfc.js';
+
+/** RFC SDK state of a destination for listSystems and healthcheck: found, or what to do. */
+function rfcSdkSummary(sdkPath?: string): { found: boolean; libraryPath?: string; missing?: string } {
+  const st = sdkStatus(sdkPath);
+  return st.found
+    ? { found: true, libraryPath: st.libraryPath }
+    : { found: false, missing: `SAP NetWeaver RFC SDK not found (looked for ${st.lookedFor.join(' and ')}, from ${st.source}). ${sdkMissingAdvice(st)}` };
+}
 
 // Single source of truth for the version announced to MCP hosts (dist/ sits one level below package.json).
 const PACKAGE_VERSION: string = require("../package.json").version;
@@ -702,6 +711,7 @@ export class AbapAdtServer extends Server {
             rfc: {
               ...(s.rfc?.ashost ? { ashost: s.rfc.ashost, sysnr: s.rfc.sysnr } : { mshost: s.rfc?.mshost, sysid: s.rfc?.sysid }),
               sessions: s.rfc?.sessions ?? 'split',
+              sdk: rfcSdkSummary(s.rfc?.sdkPath),
             },
           } : {}),
           ...(s.policy ? { policy: summarizePolicy(s.policy) } : {}),
@@ -713,9 +723,12 @@ export class AbapAdtServer extends Server {
       return this.serializeResult({ systems, default: this.defaultDest, activeToolsets: this.toolsets.active, ...(this.setupNeeded ? { setup: this.setupNeeded } : {}) });
     }
     if (name === 'healthcheck') {
+      const rfcSdk = [...this.systems.values()].filter(s => s.transport === 'rfc').map(s => ({ destination: s.name, ...rfcSdkSummary(s.rfc?.sdkPath) }));
+      const sdkMissing = rfcSdk.filter(r => !r.found);
       return this.serializeResult({
-        status: this.setupNeeded ? 'needsSetup' : 'healthy',
+        status: this.setupNeeded ? 'needsSetup' : (sdkMissing.length ? 'degraded' : 'healthy'),
         ...(this.setupNeeded ? { setup: this.setupNeeded } : {}),
+        ...(rfcSdk.length ? { rfcSdk } : {}),
         version: PACKAGE_VERSION,
         destinations: [...this.systems.keys()],
         default: this.defaultDest,

@@ -196,7 +196,7 @@ The server reads `systems.json` only when it starts.
 - Claude Desktop on macOS: choose Quit Claude (Cmd+Q), then open it again.
 - Claude Code: start a new session.
 
-Then ask for `listSystems`: the destination must show `"transport": "rfc"`.
+Then ask for `listSystems`: the destination must show `"transport": "rfc"`, and its `rfc.sdk` says whether the SDK was found. When it was not, `rfc.sdk.missing` says where the server looked and what to do. `healthcheck` reports the same per RFC destination and answers `degraded` while an SDK is missing.
 
 ## What the SAP system must allow
 
@@ -222,7 +222,7 @@ Then ask for `listSystems`: the destination must show `"transport": "rfc"`.
 1. Restart the host as above. `listSystems` shows the destination with `"transport": "rfc"`.
 2. Ask the model to log in to the destination. With SSO the browser window opens as before.
 3. Ask for `systemProfile` of the destination with `refresh: true`. It now reads the ADT collections the RFC endpoint offers, which on these releases is usually a much longer list than the HTTP discovery returned.
-4. Note that `abap-adt-mcp --check` tests only the HTTPS `url` of a destination; the SDK and the gateway port of an RFC destination are checked on its first call, or by hand with the port check above.
+4. Run `abap-adt-mcp --check`. Besides the HTTPS `url`, it checks that the SDK of every RFC destination is in place. When it is not, the FAIL line says where it looked and what to do: an SDK already unpacked in a usual folder (`~/sap/nwrfcsdk`, `~/nwrfcsdk`, `~/Downloads/nwrfcsdk`, `/usr/local/sap/nwrfcsdk`, `/opt/sap/nwrfcsdk`, `C:\nwrfcsdk`) gets the `sdkPath` to set, and a downloaded `nwrfc*.zip` in Downloads or on the Desktop that holds the library for this platform gets the exact unpack command. The server never unpacks or copies the SDK itself. The gateway port is still checked on the first call, or by hand with the port check above.
 5. Try a small write in `$TMP`: create a test program, write its source and activate it. The policy of the entry must allow `$TMP` (`"$*"` in `allowedPackages`); a `policyDenied` answer comes from the policy, not from the RFC setup.
 
 ## Sessions

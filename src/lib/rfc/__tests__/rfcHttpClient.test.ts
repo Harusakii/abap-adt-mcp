@@ -20,6 +20,8 @@ jest.mock('../nwrfc', () => ({
     }
     return mockLoader.connector;
   }),
+  sdkStatus: jest.fn(() => ({ found: true, libraryPath: '/fake/lib/libsapnwrfc.dylib', source: 'rfc.sdkPath', lookedFor: [] })),
+  sdkMissingAdvice: jest.fn(() => ''),
 }));
 
 type Handler = (req: SadtRequest, conn: FakeConnection) => Promise<SadtResponse>;
@@ -516,7 +518,7 @@ describe('server wiring of transport rfc', () => {
     const server = new AbapAdtServer();
     const systems = text(await server.dispatch('listSystems', {}, () => undefined)).systems;
     expect(systems.find((s: any) => s.destination === 'OLD')).toMatchObject({ transport: 'rfc', rfc: { ashost: 'old.example.com', sysnr: '00', sessions: 'split' } });
-    expect(systems.find((s: any) => s.destination === 'OLDSSO').rfc).toEqual({ mshost: 'ms.example.com', sysid: 'OLD', sessions: 'single' });
+    expect(systems.find((s: any) => s.destination === 'OLDSSO').rfc).toEqual({ mshost: 'ms.example.com', sysid: 'OLD', sessions: 'single', sdk: { found: true, libraryPath: '/fake/lib/libsapnwrfc.dylib' } });
     expect(systems.find((s: any) => s.destination === 'NEW').transport).toBeUndefined();
     expect(JSON.stringify(systems)).not.toContain('"pw"');
     expect(server.getDestination('NEW').rfcClient).toBeUndefined();

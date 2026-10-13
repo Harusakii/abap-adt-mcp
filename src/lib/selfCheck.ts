@@ -11,6 +11,7 @@ import { readSystems, SystemConfig, NoSystemsConfiguredError } from './systems.j
 import { buildHttpsAgent } from './tls.js';
 import { candidateBrowsers } from './browserLogin.js';
 import { classifyAdtError } from './adtErrorHints.js';
+import { sdkStatus, sdkMissingAdvice, type SdkStatus } from './rfc/nwrfc.js';
 
 export type CheckLevel = 'ok' | 'warn' | 'fail';
 export interface CheckLine { level: CheckLevel; text: string }
@@ -75,6 +76,17 @@ function network(code: string | undefined): string {
   return '';
 }
 
+/**
+ * A destination with transport "rfc" needs the SAP NetWeaver RFC SDK, which the
+ * user installs from SAP: say whether it is in place before the first login
+ * fails, and where a downloaded or unpacked copy already is.
+ */
+export function checkRfcSdk(sys: SystemConfig, env: NodeJS.ProcessEnv = process.env, status: (sdkPath?: string) => SdkStatus = (p) => sdkStatus(p, { env })): CheckLine {
+  const st = status(sys.rfc?.sdkPath);
+  if (st.found) return { level: 'ok', text: `${sys.name}: RFC SDK found at ${st.libraryPath} (from ${st.source})` };
+  return { level: 'fail', text: `${sys.name} uses transport "rfc" and the SAP NetWeaver RFC SDK is missing: looked for ${st.lookedFor.join(' and ')} (from ${st.source}). ${sdkMissingAdvice(st)}` };
+}
+
 export async function runSelfCheck(
   version: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -85,13 +97,14 @@ export async function runSelfCheck(
   try {
     const map = readSystems(env);
     systems = [...map.values()];
-    lines.push({ level: 'ok', text: `systems: ${systems.map(s => `${s.name} (${s.authType})`).join(', ')}` });
+    lines.push({ level: 'ok', text: `systems: ${systems.map(s => `${s.name} (${s.authType}${s.transport === 'rfc' ? ', rfc' : ''})`).join(', ')}` });
   } catch (e: any) {
     lines.push({ level: 'fail', text: e instanceof NoSystemsConfiguredError ? e.message : `systems: ${e.message}` });
   }
   const browser = checkBrowser(systems, env);
   if (browser) lines.push(browser);
   lines.push(...await Promise.all(systems.map(s => probe(s))));
+  lines.push(...systems.filter(s => s.transport === 'rfc').map(s => checkRfcSdk(s, env)));
 
   write(`abap-adt-mcp ${version} self-check`);
   const tag: Record<CheckLevel, string> = { ok: 'ok  ', warn: 'warn', fail: 'FAIL' };
