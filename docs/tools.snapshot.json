@@ -2242,6 +2242,8 @@
         "objectUrl",
         "oldPackage",
         "newPackage",
+        "objectName",
+        "objectType",
         "transport"
       ]
     },
