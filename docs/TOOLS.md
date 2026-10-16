@@ -212,7 +212,7 @@ Enable a subset with `MCP_TOOLSETS` (comma list, or a preset: `all`, `focused`) 
 | 📖 [`extractMethodEvaluate`](#extractmethodevaluate) | Evaluates an extract method refactoring. | `uri`*, `range`* |
 | 📖 [`extractMethodPreview`](#extractmethodpreview) | Previews an extract method refactoring. | `proposal`* |
 | ⚠️ [`extractMethodExecute`](#extractmethodexecute) | Executes an extract method refactoring. | `refactoring`* |
-| 📖 [`changePackagePreview`](#changepackagepreview) | Preview moving an object to another package (change package refactoring). Returns the refactoring proposal with affected objects; pass it unchanged to changePackageExecute. Needs a transport when the target package is transportable. | `objectUrl`*, `oldPackage`*, `newPackage`*, `transport` |
+| 📖 [`changePackagePreview`](#changepackagepreview) | Preview moving an object to another package (change package refactoring). Returns the refactoring proposal with affected objects; pass it unchanged to changePackageExecute. Needs a transport when the target package is transportable. | `objectUrl`*, `oldPackage`*, `newPackage`*, `objectName`, `objectType`, `transport` |
 | ⚠️ [`changePackageExecute`](#changepackageexecute) | Execute a change package refactoring previewed with changePackagePreview. Pass the refactoring returned by the preview as JSON. | `refactoring`* |
 
 ### RAP generation (8) · toolset `rap`
@@ -2814,6 +2814,8 @@ Preview moving an object to another package (change package refactoring). Return
 | `objectUrl` | string | yes | URL of the object to move, e.g. /sap/bc/adt/oo/classes/zcl_demo | `/sap/bc/adt/oo/classes/zcl_order_service`, `/sap/bc/adt/programs/programs/zreport` |
 | `oldPackage` | string | yes | Current package name |  |
 | `newPackage` | string | yes | Target package name |  |
+| `objectName` | string | no | Name of the object, e.g. ZCL_DEMO. Read from the object structure when omitted. |  |
+| `objectType` | string | no | ADT type of the object, e.g. CLAS/OC or DDLS/DF. Read from the object structure when omitted. |  |
 | `transport` | string | no | Transport request (required for transportable target packages) | `DEVK900123` |
 
 **When to use.** Move an object to another package: object URL, `oldPackage`, `newPackage` and a `transport` when the target package is transportable; returns the refactoring with the affected objects. Prefer it to delete-and-recreate, which loses history and transport records.

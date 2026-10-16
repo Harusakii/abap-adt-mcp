@@ -28,7 +28,7 @@ describe('changePackagePreview', () => {
 
   it('refuses a URL whose metadata has no name or type', async () => {
     const { sent, handler } = make({});
-    await expect(handler.handle('changePackagePreview', ARGS)).rejects.toThrow(/Could not read the name and type/);
+    await expect(handler.handle('changePackagePreview', ARGS)).rejects.toThrow(/Could not determine the name and ADT type/);
     expect(sent).toHaveLength(0);
   });
 });

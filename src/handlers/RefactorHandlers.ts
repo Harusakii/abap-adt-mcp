@@ -63,6 +63,8 @@ export class RefactorHandlers extends BaseHandler {
                         objectUrl: { type: 'string', description: 'URL of the object to move, e.g. /sap/bc/adt/oo/classes/zcl_demo' },
                         oldPackage: { type: 'string', description: 'Current package name' },
                         newPackage: { type: 'string', description: 'Target package name' },
+                        objectName: { type: 'string', description: 'Name of the object, e.g. ZCL_DEMO. Read from the object structure when omitted.', optional: true },
+                        objectType: { type: 'string', description: 'ADT type of the object, e.g. CLAS/OC or DDLS/DF. Read from the object structure when omitted.', optional: true },
                         transport: { type: 'string', description: 'Transport request (required for transportable target packages)', optional: true }
                     },
                     required: ['objectUrl', 'oldPackage', 'newPackage']
@@ -199,15 +201,11 @@ export class RefactorHandlers extends BaseHandler {
     async handleChangePackagePreview(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            // abap-adt-api serializes affectedObjects as one object and reads its
-            // name and type; undefined there threw before any request was sent.
-            const structure: any = await this.adtclient.objectStructure(args.objectUrl);
-            const name = structure?.metaData?.['adtcore:name'];
-            const type = structure?.metaData?.['adtcore:type'];
-            if (!name || !type) {
-                throw new McpError(ErrorCode.InvalidParams, `Could not read the name and type of ${args.objectUrl}; pass the object URL (e.g. /sap/bc/adt/programs/programs/zreport), not a source URL`);
-            }
-            const proposal: any = {
+            const { name, type } = await this.resolveObjectIdentity(args);
+            // abap-adt-api serializes affectedObjects.name/type/uri/oldPackage/newPackage
+            // before any request is sent; an undefined affected object threw
+            // "Cannot read properties of undefined (reading 'name')" (#86).
+            const proposal: ChangePackageRefactoring = {
                 oldPackage: args.oldPackage,
                 newPackage: args.newPackage,
                 transport: args.transport || '',
@@ -215,9 +213,16 @@ export class RefactorHandlers extends BaseHandler {
                 ignoreSyntaxErrorsAllowed: false,
                 ignoreSyntaxErrors: false,
                 userContent: '',
-                affectedObjects: { uri: args.objectUrl, type, name, oldPackage: args.oldPackage, newPackage: args.newPackage, parentUri: '' }
+                affectedObjects: {
+                    uri: args.objectUrl,
+                    type,
+                    name,
+                    oldPackage: args.oldPackage,
+                    newPackage: args.newPackage,
+                    parentUri: ''
+                }
             };
-            const result = await this.adtclient.changePackagePreview(proposal as ChangePackageRefactoring, args.transport);
+            const result = await this.adtclient.changePackagePreview(proposal, args.transport || '');
             this.trackRequest(startTime, true);
             return { content: [{ type: 'text', text: JSON.stringify({ status: 'success', refactoring: result, next: 'changePackageExecute' }) }] };
         } catch (error: any) {
@@ -231,10 +236,34 @@ export class RefactorHandlers extends BaseHandler {
         }
     }
 
+    // Name and ADT type of the object behind objectUrl: from the arguments when
+    // given, otherwise from the object structure (adtcore:name / adtcore:type).
+    private async resolveObjectIdentity(args: any): Promise<{ name: string; type: string }> {
+        if (args.objectName && args.objectType) return { name: String(args.objectName), type: String(args.objectType) };
+        let structure: any;
+        try {
+            structure = await this.adtclient.objectStructure(args.objectUrl);
+        } catch (error: any) {
+            throw this.adtFailure(`Failed to read the object behind ${args.objectUrl}; pass objectName and objectType to skip this lookup`, error);
+        }
+        const meta = structure?.metaData || {};
+        const name = args.objectName || meta['adtcore:name'];
+        const type = args.objectType || meta['adtcore:type'];
+        if (!name || !type) {
+            throw new McpError(ErrorCode.InvalidParams,
+                `Could not determine the name and ADT type of ${args.objectUrl} from its structure; pass objectName (e.g. ZCL_DEMO) and objectType (e.g. CLAS/OC).`);
+        }
+        return { name: String(name), type: String(type) };
+    }
+
     async handleChangePackageExecute(args: any): Promise<any> {
         const startTime = performance.now();
         try {
             const refactoring = this.parseObjectArg<ChangePackageRefactoring>(args.refactoring, 'refactoring');
+            if (!refactoring?.affectedObjects?.name || !refactoring.affectedObjects.uri) {
+                throw new McpError(ErrorCode.InvalidParams,
+                    'refactoring.affectedObjects must carry name, type, uri, oldPackage and newPackage; pass the refactoring returned by changePackagePreview unchanged.');
+            }
             this.adtclient.stateful = session_types.stateful;
             const result = await this.adtclient.changePackageExecute(refactoring);
             this.trackRequest(startTime, true);
