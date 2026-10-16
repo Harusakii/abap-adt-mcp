@@ -2,6 +2,7 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, Range, ExtractMethodProposal, GenericRefactoring, session_types } from 'abap-adt-api';
+import { extractMethodPreview } from '../lib/extractMethod.js';
 type ChangePackageRefactoring = Parameters<ADTClient['changePackageExecute']>[0];
 
 export class RefactorHandlers extends BaseHandler {
@@ -155,7 +156,7 @@ export class RefactorHandlers extends BaseHandler {
         const startTime = performance.now();
         try {
             const proposal = this.parseObjectArg<ExtractMethodProposal>(args.proposal, 'proposal');
-            const result = await this.adtclient.extractMethodPreview(proposal);
+            const result = await extractMethodPreview(this.adtclient.httpClient as any, proposal);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -227,6 +228,10 @@ export class RefactorHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             if (error instanceof McpError) throw error;
+            // SAP_BASIS 7.40 has no change package refactoring and rejects its relation.
+            if (/Unknown value for parameter 'relation'/i.test(this.formatAdtError(error))) {
+                throw new McpError(ErrorCode.InvalidRequest, `Change package is not available on this system: SAP rejected the refactoring relation (${this.formatAdtError(error)}). SAP_BASIS 7.40 and older have no change package refactoring in ADT; change the package in SAP GUI (SE03, Change Object Directory Entries, or SE80). Nothing was changed.`);
+            }
             throw this.adtFailure(`Failed to preview change package`, error);
         }
     }

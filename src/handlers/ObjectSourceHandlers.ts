@@ -180,12 +180,13 @@ export class ObjectSourceHandlers extends BaseHandler {
       let url = String(args.objectSourceUrl || '');
       const notes: string[] = [];
       // Class includes are addressed without the /source/main suffix (404 otherwise).
-      if (/\/includes\/[^/]+\/source\/main\/?$/i.test(url)) { url = url.replace(/\/source\/main\/?$/i, ''); notes.push('class includes are read without /source/main; suffix removed'); }
+      // Program includes (/programs/includes/<name>) are objects with their own /source/main.
+      if (/\/oo\/classes\/[^/]+\/includes\/[^/]+\/source\/main\/?$/i.test(url)) { url = url.replace(/\/source\/main\/?$/i, ''); notes.push('class includes are read without /source/main; suffix removed'); }
       const opts = args.version ? { version: args.version } : undefined;
       let fullSource = await this.adtclient.getObjectSource(url, opts);
       // A bare object URL answers the ADT metadata document for some types
       // (application job templates, ...): retry the source resource.
-      if (/^\s*<\?xml|^\s*<[a-z]+:/i.test(fullSource) && !/\/source\/main\/?$/i.test(url) && !/\/includes\/|\/messageclass\//i.test(url)) {
+      if (/^\s*<\?xml|^\s*<[a-z]+:/i.test(fullSource) && !/[?#]/.test(url) && !/\/source\/main\/?$/i.test(url) && !/\/oo\/classes\/[^/]+\/includes\/|\/messageclass\//i.test(url)) {
         try {
           const retried = await this.adtclient.getObjectSource(`${url.replace(/\/$/, '')}/source/main`, opts);
           if (retried && retried.trim()) { fullSource = retried; url = `${url.replace(/\/$/, '')}/source/main`; notes.push('the object URL returned metadata; /source/main was read instead'); }
@@ -264,7 +265,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       // Cache the just-written source so a follow-up syntaxCheckCode can reuse it
       // without the caller re-sending it (issue #2).
       sourceCache.set(this.adtclient, args.objectSourceUrl, args.source);
-      const activation = await this.maybeActivate(args);
+      const activation = await this.maybeActivate(args, written.lockMode);
       this.trackRequest(startTime, true);
       return {
         content: [
@@ -340,7 +341,7 @@ export class ObjectSourceHandlers extends BaseHandler {
         return true;
       });
       sourceCache.set(this.adtclient, args.objectSourceUrl, newSource);
-      const activation = await this.maybeActivate(args);
+      const activation = await this.maybeActivate(args, written.lockMode);
       this.trackRequest(startTime, true);
 
       return {
@@ -371,14 +372,22 @@ export class ObjectSourceHandlers extends BaseHandler {
   }
 
   /** activate=true: activate the object after a write and return the result (never throws on activation errors). */
-  private async maybeActivate(args: any): Promise<any> {
+  private async maybeActivate(args: any, lockMode?: string): Promise<any> {
     if (args.activate !== true) return undefined;
     const objectUrl = objectUrlOf(args.objectSourceUrl);
     try {
       const result: any = await this.adtclient.activate(objectNameFromUrl(objectUrl), objectUrl);
       return { success: result?.success !== false, ...result };
     } catch (error: any) {
-      return { success: false, error: this.formatAdtError(error) };
+      const failed: any = { success: false, error: this.formatAdtError(error) };
+      // With a lock the caller keeps across writes, SAP refuses the activation
+      // as "user X is already editing" (seen on P03, also in the locking
+      // session): it activates only unlocked objects, which is why Eclipse
+      // unlocks on save.
+      if (lockMode && lockMode !== 'auto') {
+        failed.hint = 'The object is still locked by this server (lock held across writes), and SAP activates only unlocked objects: call unLock for it, then activateByName.';
+      }
+      return failed;
     }
   }
 
@@ -442,7 +451,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       return true;
     });
     sourceCache.set(this.adtclient, args.objectSourceUrl, working);
-    const activation = await this.maybeActivate(args);
+    const activation = await this.maybeActivate(args, written.lockMode);
     this.trackRequest(startTime, true);
     return {
       content: [{
@@ -512,7 +521,7 @@ export class ObjectSourceHandlers extends BaseHandler {
         return true;
       });
       sourceCache.set(this.adtclient, sourceUrl, newSource);
-      const activation = await this.maybeActivate({ objectSourceUrl: sourceUrl, activate: args.activate });
+      const activation = await this.maybeActivate({ objectSourceUrl: sourceUrl, activate: args.activate }, written.lockMode);
       const after = findMethod(newSource, String(args.methodName), block.className);
       this.trackRequest(startTime, true);
       return { content: [{ type: 'text', text: JSON.stringify({

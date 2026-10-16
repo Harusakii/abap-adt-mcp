@@ -3,6 +3,8 @@ import { BaseHandler } from './BaseHandler.js';
 import type { ToolDefinition } from '../types/tools.js';
 import { NodeParents, NodeStructure } from "abap-adt-api";
 import { SAFE_OUTPUT_CHARS, shrinkToFit } from '../lib/responseSizing.js';
+import { includeMainPrograms } from '../lib/includeContext.js';
+import { httpStatusOf } from '../lib/adtErrorHints.js';
 
 export class NodeHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -150,7 +152,14 @@ export class NodeHandlers extends BaseHandler {
     async handleMainPrograms(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const mainPrograms = await this.adtclient.mainPrograms(args.includeUrl);
+            let mainPrograms: any[];
+            try {
+                mainPrograms = await this.adtclient.mainPrograms(args.includeUrl);
+            } catch (error: any) {
+                // SAP_BASIS 7.40 has no .../mainprograms; the include's metadata names them.
+                if (httpStatusOf(error) !== 404) throw error;
+                mainPrograms = await includeMainPrograms(this.adtclient.httpClient as any, args.includeUrl);
+            }
             this.trackRequest(startTime, true);
             return {
                 content: [

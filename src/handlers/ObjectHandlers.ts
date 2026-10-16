@@ -3,6 +3,7 @@ import { BaseHandler } from './BaseHandler.js';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 import { SAFE_OUTPUT_CHARS, shrinkToFit, hardTruncateJson } from '../lib/responseSizing.js';
+import { parseObjectTypes740 } from '../lib/objectTypes740.js';
 
 // SAP link/xml:base metadata is verbose and rarely needed for a structural
 // overview of an object - strip it (at any nesting level) before sizing.
@@ -274,7 +275,13 @@ export class ObjectHandlers extends BaseHandler {
     async handleObjectTypes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const types = await this.adtclient.objectTypes();
+            let types: any[] = await this.adtclient.objectTypes();
+            if (types.length === 0) {
+                // SAP_BASIS 7.40 answers nameditem:data as the bare type ("CLAS/OC")
+                // instead of "type:...;usedBy:...", which abap-adt-api drops.
+                const raw = await this.adtclient.httpClient.request('/sap/bc/adt/repository/informationsystem/objecttypes', { qs: { maxItemCount: 999, name: '*', data: 'usedByProvider' } });
+                types = parseObjectTypes740(String(raw.body ?? ''));
+            }
             this.trackRequest(startTime, true);
             return {
                 content: [
