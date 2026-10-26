@@ -72,6 +72,7 @@ import { SearchHandlers } from './handlers/SearchHandlers.js';
 import { CloudHandlers } from './handlers/CloudHandlers.js';
 import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { sdkStatus, sdkMissingAdvice } from './lib/rfc/nwrfc.js';
+import { requestTimeoutMs, watchForResume } from './lib/connectionHealth.js';
 
 /** RFC SDK state of a destination for listSystems and healthcheck: found, or what to do. */
 function rfcSdkSummary(sdkPath?: string): { found: boolean; libraryPath?: string; missing?: string } {
@@ -212,6 +213,8 @@ export class AbapAdtServer extends Server {
   private schemaHandlers: HandlerSet;
   private toolsets: ToolsetSelection;
   private audit = new AuditLog(process.env.MCP_AUDIT_FILE, redactSecrets);
+  private requestTimeoutMs = requestTimeoutMs();
+  private stopResumeWatch?: () => void;
 
   constructor() {
     super(
@@ -272,6 +275,11 @@ export class AbapAdtServer extends Server {
     }
 
     this.setupToolHandlers();
+
+    // After sleep or hibernate every pooled socket may be dead without anyone
+    // having noticed: drop them all, which also ends a request that was in
+    // flight, so no call (and no queue behind it) waits forever.
+    this.stopResumeWatch = watchForResume((gapMs) => this.dropConnections(`the process was suspended for about ${Math.round(gapMs / 1000)} s (sleep or hibernate)`));
   }
 
   // --- connection / destination management -------------------------------
@@ -285,7 +293,7 @@ export class AbapAdtServer extends Server {
 
     const agent = buildHttpsAgent(sys.tls, sys.insecureTls);
     const debugCallback = adtTraceCallback(sys.name);
-    const options = { httpsAgent: agent, debugCallback };
+    const options = { httpsAgent: agent, debugCallback, timeout: this.requestTimeoutMs };
     if (sys.transport === 'rfc') {
       // ADT over SADT_REST_RFC_ENDPOINT (SAP_BASIS below 7.51). The SDK binding
       // loads on the first request only; the agent is unused but kept so
@@ -306,7 +314,7 @@ export class AbapAdtServer extends Server {
       return { adtClient, rfcClient, httpsAgent: agent };
     }
     if (sys.authType === 'sso' || sys.authType === 'sso2') {
-      cookieClient = new CookieHttpClient(sys.url, [], !!sys.insecureTls, client || undefined, agent);
+      cookieClient = new CookieHttpClient(sys.url, [], !!sys.insecureTls, client || undefined, agent, this.requestTimeoutMs);
       adtClient = new ADTClient(cookieClient as any, sys.user || sys.authType, '', client, language, { debugCallback });
     } else if (sys.authType === 'oauth') {
       bearerFetcher = makeBearerFetcher(sys.oauth!);
@@ -406,11 +414,25 @@ export class AbapAdtServer extends Server {
   }
 
   /**
+   * Close every socket of every HTTP destination. The agents stay usable: the
+   * next request opens a fresh connection, and the stateful ADT session, kept
+   * in cookies, survives. A request in flight on a closed socket fails as a
+   * network error instead of hanging.
+   */
+  dropConnections(reason: string): void {
+    const http = [...this.pool.entries()].filter(([, d]) => !d.rfcClient);
+    if (!http.length) return;
+    console.error(`[abap-adt-mcp] ${reason}: closing the connections of ${http.map(([n]) => n).join(', ')}; the next call reconnects`);
+    for (const [, dest] of http) dest.httpsAgent.destroy();
+  }
+
+  /**
    * Release everything this server instance holds on SAP: explicit locks in
    * the ledgers, the stateful sessions and the keep-alive sockets. Called on
    * SIGINT/SIGTERM for stdio and when an HTTP MCP session closes or expires.
    */
   async close(): Promise<void> {
+    this.stopResumeWatch?.();
     for (const [name, dest] of this.pool) {
       try {
         const { released, failed } = await releaseAll(dest.adtClient);

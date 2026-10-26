@@ -272,6 +272,9 @@ On SAP_BASIS below 7.51 (SAP ERP 6.0 EHP7 and EHP8 among others) the ADT handler
 ### Diagnostics
 - **`MCP_ADT_TRACE_FILE`** writes one JSON line per ADT request (method, URI, status, headers) for diagnosing a backend that behaves differently. Cookie, Set-Cookie, Authorization and CSRF values are reduced to name and length, no response body is kept (error lines carry the first 300 characters of the redacted error text, and 501 marks a failure without an SAP answer), and the file is created private. Declared in `server.json`.
 
+## [Unreleased]
+- **Tool calls no longer hang after the machine was locked or asleep.** The HTTP clients of every destination had no timeout and kept idle keep-alive sockets forever. A socket that died while the laptop slept (Wi-Fi or VPN dropped, a NAT forgot the connection) was reused by the next call, which then waited for an answer that never came; since the calls of a destination run one after another, every later call waited behind it. Now idle sockets close after 30 seconds, a request that receives nothing for `SAP_REQUEST_TIMEOUT_SECONDS` (default 600, `0` restores the old wait) fails as `kind: "network"`, and when the server notices it was suspended it closes every connection, so a call that was in flight fails at once and the next one reconnects. The OAuth token request gives up after 60 seconds. New `src/lib/connectionHealth.ts`, with tests.
+
 ## [2.8.1] - 2026-10-26 - Dependency security fixes
 No change in the server's code. This release ships a lockfile with patched versions of four transitive dependencies, so the container image, which installs from the lockfile, is rebuilt without them. An npm install of 2.8.0 made today already resolves the patched versions, because the package carries no lockfile.
 
