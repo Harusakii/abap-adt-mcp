@@ -271,3 +271,14 @@ On SAP_BASIS below 7.51 (SAP ERP 6.0 EHP7 and EHP8 among others) the ADT handler
 
 ### Diagnostics
 - **`MCP_ADT_TRACE_FILE`** writes one JSON line per ADT request (method, URI, status, headers) for diagnosing a backend that behaves differently. Cookie, Set-Cookie, Authorization and CSRF values are reduced to name and length, no response body is kept (error lines carry the first 300 characters of the redacted error text, and 501 marks a failure without an SAP answer), and the file is created private. Declared in `server.json`.
+
+## [2.8.1] - 2026-10-26 - Dependency security fixes
+No change in the server's code. This release ships a lockfile with patched versions of four transitive dependencies, so the container image, which installs from the lockfile, is rebuilt without them. An npm install of 2.8.0 made today already resolves the patched versions, because the package carries no lockfile.
+
+### Security
+- `follow-redirects` 1.16.0 → 1.16.2 (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c), through axios. Neither bypass is reachable here: axios hands follow-redirects a plain header object, and the server sets no `sensitiveHeaders`.
+- `body-parser` 2.3.0 → 2.4.0 (GHSA-27r3-jxmh-p828) and `ip-address` 10.7.2 → 10.7.5 (GHSA-rxp7-6hxx-x8q5), through the MCP SDK's express app and rate limiter, which the server never loads: the HTTP transport uses `node:http` with its own body reader.
+- `fast-uri` 3.1.8 → 3.1.9 (GHSA-w74x-v6f9-j3xg, GHSA-xhq7-xmqj-769h, GHSA-wjr9-j795-jxcr, GHSA-333x-w4r6-6crp), through ajv, which resolves only the server's own schemas.
+
+### Dependencies
+- `abap-adt-api` 8.4.3 → 8.5.0, `puppeteer-core` 25.12.0 → 25.13.0, `koffi` 3.3.2 → 3.3.3 (optional), `dotenv` 17 → 18. dotenv 18 writes its load message to stderr, and the server still passes `quiet: true`, so stdout stays the JSON-RPC channel only.
