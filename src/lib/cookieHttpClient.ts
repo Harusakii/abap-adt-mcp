@@ -78,6 +78,11 @@ export class CookieHttpClient {
     for (const c of cookies) this.jar.set(c.name, c.value);
   }
 
+  /** Drop the cookies whose name matches (the dead sap-contextid of a timed-out session). */
+  forgetCookies(name: RegExp): void {
+    for (const k of [...this.jar.keys()]) if (name.test(k)) this.jar.delete(k);
+  }
+
   private cookieHeader(): string {
     return [...this.jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
   }

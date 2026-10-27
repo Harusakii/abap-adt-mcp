@@ -523,6 +523,34 @@ export class AbapAdtServer extends Server {
     clearLedger(dest.adtClient);
   }
 
+  /**
+   * A new stateful session after the old one timed out (ICMENOSESSION). The
+   * logon is still valid, so no browser login: drop the dead sap-contextid and
+   * log in again with the credentials or cookies at hand. abap-adt-api ignores
+   * the Set-Cookie of an error answer, which is how the dead cookie stayed and
+   * every later call (dropSession included) kept failing with 400. Should the
+   * logon have expired as well, the full re-authentication takes over.
+   */
+  private async renewSessionContext(name: string): Promise<void> {
+    const dest = this.getDestination(name);
+    if (dest.rfcClient) return this.reauthenticate(name);
+    dest.cookieClient?.forgetCookies(/^sap-contextid$/i);
+    const jar: Map<string, string> | undefined = (dest.adtClient.httpClient as any).cookie;
+    if (jar instanceof Map) for (const k of [...jar.keys()]) if (/^sap-contextid$/i.test(k)) jar.delete(k);
+    try {
+      // login() starts a fresh cookie jar and CSRF token (basic, OAuth); over
+      // the cookie client the SSO cookies carry the logon.
+      await dest.adtClient.login();
+    } catch (e) {
+      if (classifyAdtError(e).kind !== 'sessionExpired') throw e;
+      return this.reauthenticate(name);
+    }
+    dest.adtClient.stateful = session_types.stateful;
+    sourceCache.clear(dest.adtClient);
+    // The locks lived in the session that ended.
+    clearLedger(dest.adtClient);
+  }
+
   // --- tool registration --------------------------------------------------
 
   /** Add a `destination` parameter to a tool's input schema. */
@@ -854,9 +882,14 @@ export class AbapAdtServer extends Server {
         // hint, which is the honest outcome.
         const cls = classifyAdtError(error, { destination, transport: dest.system.transport === 'rfc' ? 'rfc' : 'http' });
         if (name === 'logout' || (cls.kind !== 'sessionExpired' && cls.kind !== 'csrf')) throw error;
-        console.error(`[abap-adt-mcp] session for ${destination} expired during ${name} (${cls.kind}); re-authenticating and retrying once`);
         onRetry();
-        await this.reauthenticate(destination);
+        if (cls.contextLost) {
+          console.error(`[abap-adt-mcp] stateful session for ${destination} timed out during ${name} (ICMENOSESSION); opening a new session and retrying once`);
+          await this.renewSessionContext(destination);
+        } else {
+          console.error(`[abap-adt-mcp] session for ${destination} expired during ${name} (${cls.kind}); re-authenticating and retrying once`);
+          await this.reauthenticate(destination);
+        }
         result = await dest.handlers[handlerKey!].handle(name, args);
       }
       // Objects moved, renamed, created or deleted: the objectUrl -> package
